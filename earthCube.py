@@ -14,7 +14,11 @@ TERRAIN_COLORS = {
 }
 
 TILE_SIZE = 32
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
+
+# Zoom limits
+MIN_ZOOM = 0.1
+MAX_ZOOM = 4.0
 
 class Game:
     def __init__(self):
@@ -55,12 +59,20 @@ class Game:
         self.terrain[(tile_x, tile_y)] = self.current_tool
 
     def zoom_at(self, factor_mult, mx, my):
+        # Calculate world position under mouse for old zoom
         old_tile_size = TILE_SIZE * self.zoom_factor
         world_x = self.camera_x + mx / old_tile_size
         world_y = self.camera_y + my / old_tile_size
+
+        # Apply zoom multiplier and clamp to limits
         self.zoom_factor *= factor_mult
-        self.zoom_factor = max(0.1, self.zoom_factor)
+        self.zoom_factor = max(MIN_ZOOM, min(MAX_ZOOM, self.zoom_factor))
+
+        # Recalculate camera so that the world point stays under the mouse
         new_tile_size = TILE_SIZE * self.zoom_factor
+        # Avoid division by zero (shouldn't happen due to MIN_ZOOM) but safe-guard
+        if new_tile_size == 0:
+            return
         self.camera_x = world_x - mx / new_tile_size
         self.camera_y = world_y - my / new_tile_size
 
@@ -80,10 +92,10 @@ class Game:
                         self.current_tool = 'rock'
                     elif event.key == pygame.K_5:
                         self.current_tool = 'forest'
-                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS):
+                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
                         mx, my = pygame.mouse.get_pos()
                         self.zoom_at(1.1, mx, my)
-                    elif event.key == pygame.K_MINUS:
+                    elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
                         mx, my = pygame.mouse.get_pos()
                         self.zoom_at(1 / 1.1, mx, my)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -107,8 +119,10 @@ class Game:
                         dx = mx - self.drag_start_x
                         dy = my - self.drag_start_y
                         tile_size = TILE_SIZE * self.zoom_factor
-                        self.camera_x -= dx / tile_size
-                        self.camera_y -= dy / tile_size
+                        # Guard against tile_size being zero
+                        if tile_size != 0:
+                            self.camera_x -= dx / tile_size
+                            self.camera_y -= dy / tile_size
                         self.drag_start_x = mx
                         self.drag_start_y = my
                 elif event.type == pygame.MOUSEWHEEL:
@@ -134,6 +148,10 @@ class Game:
 
             # Draw visible tiles
             tile_size = TILE_SIZE * self.zoom_factor
+            # Ensure tile_size positive and non-zero for calculations
+            if tile_size <= 0:
+                tile_size = TILE_SIZE * MIN_ZOOM
+
             tiles_wide = math.ceil(SCREEN_WIDTH / tile_size) + 2
             tiles_high = math.ceil(SCREEN_HEIGHT / tile_size) + 2
             start_x = math.floor(self.camera_x)
