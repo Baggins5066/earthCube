@@ -33,14 +33,15 @@ ELEV_OCTAVES = 6
 MOIST_OCTAVES = 4
 RIVER_OCTAVES = 5
 
-ELEV_FREQ = 1 / 200.0      # larger wavelength = smoother continents
-MOIST_FREQ = 1 / 80.0
-RIVER_FREQ = 1 / 400.0     # very low freq to create long river shapes
+# Higher frequency = smaller scale terrain
+ELEV_FREQ = 1 / 100.0     # was 1/200
+MOIST_FREQ = 1 / 40.0     # was 1/80
+RIVER_FREQ = 1 / 200.0    # was 1/400
 
 SEA_LEVEL = 0.45
 BEACH_WIDTH = 0.03
 MOUNTAIN_LEVEL = 0.75
-RIVER_THRESHOLD = 0.18     # lower => fewer rivers
+RIVER_THRESHOLD = 0.18
 
 # Utility deterministic hash-based pseudo-random
 def hash01(ix, iy, seed=SEED):
