@@ -3,14 +3,16 @@ import random
 import platform
 import asyncio
 import math
+from functools import lru_cache
 
-# Colors for terrain
+# Colors for terrain (added river)
 TERRAIN_COLORS = {
-    'water': (0, 0, 255),
-    'grass': (0, 255, 0),
-    'sand': (255, 255, 0),
-    'rock': (128, 128, 128),
-    'forest': (0, 100, 0)
+    'water': (0, 0, 200),
+    'river': (0, 50, 200),
+    'grass': (50, 200, 50),
+    'sand': (230, 220, 130),
+    'rock': (130, 130, 130),
+    'forest': (16, 100, 16)
 }
 
 TILE_SIZE = 32
@@ -25,6 +27,76 @@ BUTTON_PADDING = 10
 BUTTON_WIDTH = 80
 BUTTON_HEIGHT = 30
 
+# Terrain generation params
+SEED = 1337
+ELEV_OCTAVES = 6
+MOIST_OCTAVES = 4
+RIVER_OCTAVES = 5
+
+ELEV_FREQ = 1 / 200.0      # larger wavelength = smoother continents
+MOIST_FREQ = 1 / 80.0
+RIVER_FREQ = 1 / 400.0     # very low freq to create long river shapes
+
+SEA_LEVEL = 0.45
+BEACH_WIDTH = 0.03
+MOUNTAIN_LEVEL = 0.75
+RIVER_THRESHOLD = 0.18     # lower => fewer rivers
+
+# Utility deterministic hash-based pseudo-random
+def hash01(ix, iy, seed=SEED):
+    # 32-bit integer hashing, produces float in [0,1)
+    n = (ix * 374761393 + iy * 668265263 + seed * 982451653) & 0xFFFFFFFF
+    n = (n ^ (n >> 13)) * 1274126177 & 0xFFFFFFFF
+    return (n & 0xFFFFFF) / float(1 << 24)
+
+def fade(t):
+    # classic Perlin fade
+    return t * t * t * (t * (t * 6 - 15) + 10)
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+def value_noise(x, y, freq):
+    # value noise with bilinear interpolation and deterministic corner values
+    fx = x * freq
+    fy = y * freq
+    ix = math.floor(fx)
+    iy = math.floor(fy)
+    tx = fx - ix
+    ty = fy - iy
+    u = fade(tx)
+    v = fade(ty)
+    # corners
+    n00 = hash01(ix, iy)
+    n10 = hash01(ix + 1, iy)
+    n01 = hash01(ix, iy + 1)
+    n11 = hash01(ix + 1, iy + 1)
+    nx0 = lerp(n00, n10, u)
+    nx1 = lerp(n01, n11, u)
+    nxy = lerp(nx0, nx1, v)
+    return nxy  # in [0,1)
+
+def fbm(x, y, base_freq, octaves, persistence=0.5, lacunarity=2.0):
+    value = 0.0
+    amplitude = 1.0
+    frequency = base_freq
+    max_ampl = 0.0
+    for _ in range(octaves):
+        value += (value_noise(x, y, frequency) * 2 - 1) * amplitude
+        max_ampl += amplitude
+        amplitude *= persistence
+        frequency *= lacunarity
+    # Normalize to [0,1]
+    normalized = (value / max_ampl + 1) / 2
+    return max(0.0, min(1.0, normalized))
+
+# Ridged noise helper for river-like structures (higher contrast)
+def ridged_fbm(x, y, base_freq, octaves):
+    v = fbm(x, y, base_freq, octaves)
+    # make ridges: invert and square to emphasize low channels
+    r = (1.0 - v)
+    return r * r
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -33,7 +105,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.camera_x, self.camera_y = 0.0, 0.0
         self.zoom_factor = 1.0
-        self.terrain = {}
+        self.terrain = {}  # cache: (x,y) -> terrain_type
         self.current_tool = 'grass'
         self.brush_size = 1
         self.is_painting = False
@@ -62,20 +134,64 @@ class Game:
         rect_plus = pygame.Rect(x, y, 40, BUTTON_HEIGHT)
         self.buttons.append(("brush_plus", None, rect_plus))
 
-    def generate_terrain(self, x, y):
-        x, y = int(x), int(y)
-        if (x, y) not in self.terrain:
-            rand = random.random()
-            if rand < 0.2:
-                self.terrain[(x, y)] = 'water'
-            elif rand < 0.4:
-                self.terrain[(x, y)] = 'sand'
-            elif rand < 0.6:
-                self.terrain[(x, y)] = 'rock'
-            elif rand < 0.8:
-                self.terrain[(x, y)] = 'forest'
+    def generate_terrain(self, tile_x, tile_y):
+        """
+        On-demand deterministic terrain generation using:
+        - elevation (fBm) for continents and mountains
+        - moisture (fBm) for forests vs grasslands
+        - ridged/drainage noise for river channels
+        """
+        # use center of tile for sampling
+        sx = tile_x + 0.5
+        sy = tile_y + 0.5
+
+        # Elevation: multi-scale fBm (continental shaping)
+        elev = fbm(sx, sy, ELEV_FREQ, ELEV_OCTAVES, persistence=0.5, lacunarity=2.0)
+
+        # Add a subtle continental bias by combining with a very low frequency value_noise
+        continental = value_noise(sx, sy, ELEV_FREQ * 0.2) * 0.25 + 0.75
+        elev = elev * continental
+        elev = max(0.0, min(1.0, elev))
+
+        # Moisture: affects forest vs grass
+        moist = fbm(sx + 2000, sy - 1230, MOIST_FREQ, MOIST_OCTAVES, persistence=0.65)
+        # bias moisture by proximity to water (coast -> wetter)
+        # (approximate by checking elevation nearby with a cheap sample)
+        near_sea = 0.0
+        for ox in (-1, 0, 1):
+            for oy in (-1, 0, 1):
+                near_elev = fbm(sx + ox * 3, sy + oy * 3, ELEV_FREQ, 2)
+                if near_elev < SEA_LEVEL:
+                    near_sea += 1
+        near_sea /= 9.0
+        moist = moist * (0.7 + 0.8 * near_sea)
+        moist = max(0.0, min(1.0, moist))
+
+        # Drainage/rivers: ridged noise to create branching river channels
+        drain = ridged_fbm(sx + 6000, sy - 4000, RIVER_FREQ, RIVER_OCTAVES)
+
+        # Decide biome
+        terrain = 'grass'
+        if elev < SEA_LEVEL:
+            terrain = 'water'
+        else:
+            # river override if a channel passes and elevation is not too high
+            if drain < RIVER_THRESHOLD and elev > SEA_LEVEL + 0.02 and elev < MOUNTAIN_LEVEL + 0.05:
+                terrain = 'river'
             else:
-                self.terrain[(x, y)] = 'grass'
+                # beach zone
+                if elev < SEA_LEVEL + BEACH_WIDTH:
+                    terrain = 'sand'
+                elif elev > MOUNTAIN_LEVEL:
+                    terrain = 'rock'
+                else:
+                    # moisture-driven forest vs grass
+                    if moist > 0.58 and elev < MOUNTAIN_LEVEL - 0.05:
+                        terrain = 'forest'
+                    else:
+                        terrain = 'grass'
+
+        self.terrain[(tile_x, tile_y)] = terrain
 
     def paint_tile(self, mx, my):
         # Adjust for UI bar
@@ -147,7 +263,9 @@ class Game:
         tile_y = math.floor(world_y)
 
         overlay = pygame.Surface((math.ceil(tile_size) + 1, math.ceil(tile_size) + 1), pygame.SRCALPHA)
-        overlay.fill((255, 255, 255, 80))  # semi-transparent white
+        # preview color matches current tool but semi-transparent
+        base = TERRAIN_COLORS.get(self.current_tool, (255, 255, 255))
+        overlay.fill((base[0], base[1], base[2], 100))
 
         for dx in range(-self.brush_size + 1, self.brush_size):
             for dy in range(-self.brush_size + 1, self.brush_size):
@@ -194,6 +312,24 @@ class Game:
                             self.zoom_at(1.1, mx, my)
                         elif event.y < 0:
                             self.zoom_at(1 / 1.1, mx, my)
+                elif event.type == pygame.KEYDOWN:
+                    # optional keyboard shortcuts kept
+                    if event.key == pygame.K_1:
+                        self.current_tool = 'water'
+                    elif event.key == pygame.K_2:
+                        self.current_tool = 'grass'
+                    elif event.key == pygame.K_3:
+                        self.current_tool = 'sand'
+                    elif event.key == pygame.K_4:
+                        self.current_tool = 'rock'
+                    elif event.key == pygame.K_5:
+                        self.current_tool = 'forest'
+                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                        mx, my = pygame.mouse.get_pos()
+                        self.zoom_at(1.1, mx, my)
+                    elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                        mx, my = pygame.mouse.get_pos()
+                        self.zoom_at(1 / 1.1, mx, my)
 
             # Movement keys
             keys = pygame.key.get_pressed()
@@ -224,7 +360,8 @@ class Game:
                 for dy in range(tiles_high):
                     tile_x = start_x + dx
                     tile_y = start_y + dy
-                    self.generate_terrain(tile_x, tile_y)
+                    if (tile_x, tile_y) not in self.terrain:
+                        self.generate_terrain(tile_x, tile_y)
                     color = TERRAIN_COLORS[self.terrain[(tile_x, tile_y)]]
                     rect_x = round(offset_x + dx * tile_size)
                     rect_y = round(offset_y + dy * tile_size)
@@ -232,7 +369,7 @@ class Game:
                     rect_h = math.ceil(tile_size) + 1
                     pygame.draw.rect(self.screen, color, (rect_x, rect_y, rect_w, rect_h))
 
-            # Draw brush preview
+            # Draw brush preview (matches tool color)
             self.draw_brush_preview()
 
             # Draw UI last
