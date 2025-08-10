@@ -30,7 +30,7 @@ class Game:
         self.zoom_factor = 1.0
         self.terrain = {}  # (x, y): terrain_type
         self.current_tool = 'grass'  # Default tool
-        self.is_painting = False  # Track mouse button state
+        self.is_painting = False
         self.dragging = False
         self.drag_start_x = 0
         self.drag_start_y = 0
@@ -59,18 +59,14 @@ class Game:
         self.terrain[(tile_x, tile_y)] = self.current_tool
 
     def zoom_at(self, factor_mult, mx, my):
-        # Calculate world position under mouse for old zoom
         old_tile_size = TILE_SIZE * self.zoom_factor
         world_x = self.camera_x + mx / old_tile_size
         world_y = self.camera_y + my / old_tile_size
 
-        # Apply zoom multiplier and clamp to limits
         self.zoom_factor *= factor_mult
         self.zoom_factor = max(MIN_ZOOM, min(MAX_ZOOM, self.zoom_factor))
 
-        # Recalculate camera so that the world point stays under the mouse
         new_tile_size = TILE_SIZE * self.zoom_factor
-        # Avoid division by zero (shouldn't happen due to MIN_ZOOM) but safe-guard
         if new_tile_size == 0:
             return
         self.camera_x = world_x - mx / new_tile_size
@@ -99,11 +95,11 @@ class Game:
                         mx, my = pygame.mouse.get_pos()
                         self.zoom_at(1 / 1.1, mx, my)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1:  # Left mouse button
+                    if event.button == 1:
                         self.is_painting = True
                         mx, my = event.pos
                         self.paint_tile(mx, my)
-                    elif event.button == 3:  # Right mouse button
+                    elif event.button == 3:
                         self.dragging = True
                         self.drag_start_x, self.drag_start_y = event.pos
                 elif event.type == pygame.MOUSEBUTTONUP:
@@ -119,7 +115,6 @@ class Game:
                         dx = mx - self.drag_start_x
                         dy = my - self.drag_start_y
                         tile_size = TILE_SIZE * self.zoom_factor
-                        # Guard against tile_size being zero
                         if tile_size != 0:
                             self.camera_x -= dx / tile_size
                             self.camera_y -= dy / tile_size
@@ -134,7 +129,7 @@ class Game:
 
             # Movement
             keys = pygame.key.get_pressed()
-            move_speed = 0.1  # Adjust for desired speed
+            move_speed = 0.1
             if keys[pygame.K_LEFT]:
                 self.camera_x -= move_speed
             if keys[pygame.K_RIGHT]:
@@ -146,9 +141,8 @@ class Game:
 
             self.screen.fill((0, 0, 0))
 
-            # Draw visible tiles
+            # Draw visible tiles without gaps
             tile_size = TILE_SIZE * self.zoom_factor
-            # Ensure tile_size positive and non-zero for calculations
             if tile_size <= 0:
                 tile_size = TILE_SIZE * MIN_ZOOM
 
@@ -165,9 +159,11 @@ class Game:
                     tile_y = start_y + dy
                     self.generate_terrain(tile_x, tile_y)
                     color = TERRAIN_COLORS[self.terrain[(tile_x, tile_y)]]
-                    rect_x = offset_x + dx * tile_size
-                    rect_y = offset_y + dy * tile_size
-                    pygame.draw.rect(self.screen, color, (rect_x, rect_y, tile_size, tile_size))
+                    rect_x = round(offset_x + dx * tile_size)
+                    rect_y = round(offset_y + dy * tile_size)
+                    rect_w = math.ceil(tile_size) + 1  # cover gaps
+                    rect_h = math.ceil(tile_size) + 1
+                    pygame.draw.rect(self.screen, color, (rect_x, rect_y, rect_w, rect_h))
 
             pygame.display.flip()
             self.clock.tick(60)
