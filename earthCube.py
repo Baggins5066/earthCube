@@ -8,8 +8,8 @@ from functools import lru_cache
 # Constants
 # -------------------
 TERRAIN_COLORS = {
-    'water': (0, 0, 200),
-    'river': (0, 50, 200),
+    'ocean': (0, 0, 200),
+    'shallow water': (0, 50, 200),
     'grass': (50, 200, 50),
     'sand': (230, 220, 130),
     'rock': (130, 130, 130),
@@ -43,7 +43,7 @@ RIVER_FREQ = 1 / 100.0
 SEA_LEVEL = 0.45
 BEACH_WIDTH = 0.03
 MOUNTAIN_LEVEL = 0.75
-RIVER_THRESHOLD = 0.18
+SHALLOW_WATER_THRESHOLD = 0.18
 
 # -------------------
 # Noise functions
@@ -120,9 +120,9 @@ def get_tile_biome(tile_x, tile_y):
     drain = ridged_fbm(sx + 6000, sy - 4000, RIVER_FREQ, RIVER_OCTAVES)
 
     if elev < SEA_LEVEL:
-        return 'water'
-    if drain < RIVER_THRESHOLD and SEA_LEVEL + 0.02 < elev < MOUNTAIN_LEVEL + 0.05:
-        return 'river'
+        return 'ocean'
+    if drain < SHALLOW_WATER_THRESHOLD and SEA_LEVEL + 0.02 < elev < MOUNTAIN_LEVEL + 0.05:
+        return 'shallow water'
     if elev < SEA_LEVEL + BEACH_WIDTH:
         return 'sand'
     if elev > MOUNTAIN_LEVEL:
@@ -138,7 +138,7 @@ class Game:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Earth Cube")
+        pygame.display.set_caption("Endless Map Simulator")
         self.clock = pygame.time.Clock()
         self.camera_x, self.camera_y = 0.0, 0.0
         self.zoom_factor = 1.0
