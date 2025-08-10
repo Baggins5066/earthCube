@@ -39,7 +39,7 @@ ELEV_OCTAVES = 6
 MOIST_OCTAVES = 4
 RIVER_OCTAVES = 5
 ELEV_FREQ = 1 / 50.0
-MOIST_FREQ = 1 / 20.0
+MOIST_FREQ = 1 / 50.0
 RIVER_FREQ = 1 / 100.0
 SEA_LEVEL = 0.45
 BEACH_WIDTH = 0.03
@@ -47,7 +47,7 @@ MOUNTAIN_LEVEL = 0.75
 SHALLOW_WATER_THRESHOLD = 0.18
 
 # Entity settings
-ENTITY_SPAWN_CHANCE = 0.02  # Chance per tile to spawn on initial load
+ENTITY_SPAWN_CHANCE = 0.02  # Chance per tile to spawn on initial load or paint
 ENTITY_MAX_PER_TILE = 3     # Max entities per tile
 ENTITY_SPEED = 0.05         # Tiles per second
 ENTITY_SIZE = 8             # Pixel size for rendering
@@ -141,7 +141,7 @@ def get_tile_biome(tile_x, tile_y):
         return 'sand'
     if elev > MOUNTAIN_LEVEL:
         return 'rock'
-    if moist > 0.58 and elev < MOUNTAIN_LEVEL - 0.05:
+    if moist > 0.4 and elev < MOUNTAIN_LEVEL - 0.02:
         return 'forest'
     return 'grass'
 
@@ -222,7 +222,9 @@ class Game:
         self.entities = {}  # Dict of (tile_x, tile_y) -> list of entities
         self.loaded_tiles = set()  # Track loaded tiles to prevent respawning
         self.current_tool = 'grass'
+        self.current_tool_type = 'material'
         self.brush_size = 1
+        self.inventory = {'wood': 0, 'stone': 0}
         self.is_painting = False
         self.dragging = False
         self.drag_start_x = 0
@@ -241,6 +243,11 @@ class Game:
             rect = pygame.Rect(x, y, BUTTON_WIDTH, BUTTON_HEIGHT)
             self.buttons.append(("material", material, rect))
             x += BUTTON_WIDTH + BUTTON_PADDING
+        tools = ['axe', 'pickaxe']
+        for tool in tools:
+            rect = pygame.Rect(x, y, BUTTON_WIDTH, BUTTON_HEIGHT)
+            self.buttons.append(("tool", tool, rect))
+            x += BUTTON_WIDTH + BUTTON_PADDING
         rect_minus = pygame.Rect(x, y, 40, BUTTON_HEIGHT)
         self.buttons.append(("brush_minus", None, rect_minus))
         x += 40 + BUTTON_PADDING
@@ -254,22 +261,47 @@ class Game:
         tile_size = TILE_SIZE * self.zoom_factor
         world_x = self.camera_x + mx / tile_size
         world_y = self.camera_y + my / tile_size
-        tile_x = math.floor(world_x)
-        tile_y = math.floor(world_y)
-        for dx in range(-self.brush_size + 1, self.brush_size):
-            for dy in range(-self.brush_size + 1, self.brush_size):
-                tile_key = (tile_x + dx, tile_y + dy)
-                old_terrain = self.terrain.get(tile_key, get_tile_biome(tile_x + dx, tile_y + dy))
-                self.terrain[tile_key] = self.current_tool
-                # Remove entities if terrain becomes invalid
-                if tile_key in self.entities:
-                    valid_entities = []
-                    for entity in self.entities[tile_key]:
-                        if self.current_tool in ENTITY_TYPES[entity.type]['terrains']:
-                            valid_entities.append(entity)
-                    self.entities[tile_key] = valid_entities
-                    if not valid_entities:
-                        del self.entities[tile_key]
+        center_tile_x = math.floor(world_x)
+        center_tile_y = math.floor(world_y)
+        if self.current_tool_type == 'material':
+            for dx in range(-self.brush_size + 1, self.brush_size):
+                for dy in range(-self.brush_size + 1, self.brush_size):
+                    tile_key = (center_tile_x + dx, center_tile_y + dy)
+                    old_terrain = self.terrain.get(tile_key, get_tile_biome(*(tile_key)))
+                    new_terrain = self.current_tool
+                    if new_terrain != old_terrain:
+                        self.terrain[tile_key] = new_terrain
+                        self.handle_terrain_change(tile_key, old_terrain, new_terrain)
+        elif self.current_tool_type == 'tool':
+            tile_key = (center_tile_x, center_tile_y)
+            old_terrain = self.terrain.get(tile_key, get_tile_biome(*(tile_key)))
+            new_terrain = old_terrain
+            if self.current_tool == 'axe' and old_terrain == 'forest':
+                new_terrain = 'grass'
+                self.inventory['wood'] += 1
+            elif self.current_tool == 'pickaxe' and old_terrain == 'rock':
+                new_terrain = 'grass'
+                self.inventory['stone'] += 1
+            if new_terrain != old_terrain:
+                self.terrain[tile_key] = new_terrain
+                self.handle_terrain_change(tile_key, old_terrain, new_terrain)
+
+    def handle_terrain_change(self, tile_key, old_terrain, new_terrain):
+        # Remove invalid entities
+        if tile_key in self.entities:
+            valid_entities = [entity for entity in self.entities[tile_key] if new_terrain in ENTITY_TYPES[entity.type]['terrains']]
+            self.entities[tile_key] = valid_entities
+            if not valid_entities:
+                del self.entities[tile_key]
+        # Chance to spawn new entity
+        if random.random() < ENTITY_SPAWN_CHANCE:
+            valid_types = [et for et, data in ENTITY_TYPES.items() if new_terrain in data['terrains']]
+            if valid_types and len(self.entities.get(tile_key, [])) < ENTITY_MAX_PER_TILE:
+                entity_type = random.choice(valid_types)
+                new_entity = Entity(entity_type, tile_key[0] + 0.5, tile_key[1] + 0.5)
+                if tile_key not in self.entities:
+                    self.entities[tile_key] = []
+                self.entities[tile_key].append(new_entity)
 
     def zoom_at(self, factor_mult, mx, my):
         old_tile_size = TILE_SIZE * self.zoom_factor
@@ -287,6 +319,10 @@ class Game:
         for btn_type, value, rect in self.buttons:
             if rect.collidepoint(pos):
                 if btn_type == "material":
+                    self.current_tool_type = 'material'
+                    self.current_tool = value
+                elif btn_type == "tool":
+                    self.current_tool_type = 'tool'
                     self.current_tool = value
                 elif btn_type == "brush_minus":
                     self.brush_size = max(1, self.brush_size - 1)
@@ -299,11 +335,11 @@ class Game:
         pygame.draw.rect(self.screen, (50, 50, 50), (0, 0, SCREEN_WIDTH, UI_HEIGHT))
         for btn_type, value, rect in self.buttons:
             color = (200, 200, 200)
-            if btn_type == "material" and value == self.current_tool:
+            if btn_type in ["material", "tool"] and value == self.current_tool and btn_type == self.current_tool_type:
                 color = (255, 255, 255)
             pygame.draw.rect(self.screen, color, rect)
             pygame.draw.rect(self.screen, (0, 0, 0), rect, 2)
-            if btn_type == "material":
+            if btn_type in ["material", "tool"]:
                 text_surf = self.font.render(value, True, (0, 0, 0))
             elif btn_type == "brush_minus":
                 text_surf = self.font.render("-", True, (0, 0, 0))
@@ -311,7 +347,9 @@ class Game:
                 text_surf = self.font.render("+", True, (0, 0, 0))
             self.screen.blit(text_surf, text_surf.get_rect(center=rect.center))
         brush_label = self.font.render(f"Brush: {self.brush_size}", True, (255, 255, 255))
-        self.screen.blit(brush_label, (SCREEN_WIDTH - 150, (UI_HEIGHT - brush_label.get_height()) // 2))
+        self.screen.blit(brush_label, (SCREEN_WIDTH - 300, (UI_HEIGHT - brush_label.get_height()) // 2))
+        inv_label = self.font.render(f"Wood: {self.inventory['wood']} Stone: {self.inventory['stone']}", True, (255, 255, 255))
+        self.screen.blit(inv_label, (SCREEN_WIDTH - 500, (UI_HEIGHT - inv_label.get_height()) // 2))
 
     def draw_zoom_slider(self):
         slider_x = SCREEN_WIDTH - SLIDER_WIDTH - BUTTON_PADDING
@@ -349,10 +387,17 @@ class Game:
         tile_x = math.floor(world_x)
         tile_y = math.floor(world_y)
         overlay = pygame.Surface((math.ceil(tile_size) + 1, math.ceil(tile_size) + 1), pygame.SRCALPHA)
-        base = TERRAIN_COLORS.get(self.current_tool, (255, 255, 255))
+        if self.current_tool_type == 'material':
+            base = TERRAIN_COLORS.get(self.current_tool, (255, 255, 255))
+            dx_range = range(-self.brush_size + 1, self.brush_size)
+            dy_range = range(-self.brush_size + 1, self.brush_size)
+        else:  # tool
+            base = (128, 128, 128)  # gray for tools
+            dx_range = range(0, 1)
+            dy_range = range(0, 1)
         overlay.fill((base[0], base[1], base[2], 100))
-        for dx in range(-self.brush_size + 1, self.brush_size):
-            for dy in range(-self.brush_size + 1, self.brush_size):
+        for dx in dx_range:
+            for dy in dy_range:
                 screen_x = round((tile_x + dx - self.camera_x) * tile_size)
                 screen_y = round((tile_y + dy - self.camera_y) * tile_size + UI_HEIGHT)
                 self.screen.blit(overlay, (screen_x, screen_y))
@@ -368,15 +413,10 @@ class Game:
                 self.loaded_tiles.add(tile_key)
                 tile_type = self.terrain.get(tile_key, get_tile_biome(tile_x, tile_y))
                 
-                # Count existing entities
-                entity_count = len(self.entities.get(tile_key, []))
-                if entity_count >= ENTITY_MAX_PER_TILE:
-                    continue
-                    
                 # Try to spawn a new entity
                 if random.random() < ENTITY_SPAWN_CHANCE:
                     valid_entities = [e for e, data in ENTITY_TYPES.items() if tile_type in data['terrains']]
-                    if valid_entities:
+                    if valid_entities and len(self.entities.get(tile_key, [])) < ENTITY_MAX_PER_TILE:
                         entity_type = random.choice(valid_entities)
                         new_entity = Entity(entity_type, tile_x + 0.5, tile_y + 0.5)
                         if tile_key not in self.entities:
