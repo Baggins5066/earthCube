@@ -4,7 +4,9 @@ import asyncio
 import math
 from functools import lru_cache
 
-# Colors for terrain
+# -------------------
+# Constants
+# -------------------
 TERRAIN_COLORS = {
     'water': (0, 0, 200),
     'river': (0, 50, 200),
@@ -17,7 +19,6 @@ TERRAIN_COLORS = {
 TILE_SIZE = 32
 SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
 
-# Zoom limits
 MIN_ZOOM = 0.1
 MAX_ZOOM = 4.0
 
@@ -26,17 +27,19 @@ BUTTON_PADDING = 10
 BUTTON_WIDTH = 80
 BUTTON_HEIGHT = 30
 
-# Terrain generation params
+# Slider constants
+SLIDER_WIDTH = 200
+SLIDER_HEIGHT = 16
+SLIDER_PADDING = 20  # distance from bottom-right corner
+
+# Terrain gen params
 SEED = 1337
 ELEV_OCTAVES = 6
 MOIST_OCTAVES = 4
 RIVER_OCTAVES = 5
-
-# Smaller scale = higher frequency
 ELEV_FREQ = 1 / 50.0
 MOIST_FREQ = 1 / 20.0
 RIVER_FREQ = 1 / 100.0
-
 SEA_LEVEL = 0.45
 BEACH_WIDTH = 0.03
 MOUNTAIN_LEVEL = 0.75
@@ -104,7 +107,6 @@ def get_tile_biome(tile_x, tile_y):
     elev = max(0.0, min(1.0, elev))
 
     moist = fbm(sx + 2000, sy - 1230, MOIST_FREQ, MOIST_OCTAVES, persistence=0.65)
-
     near_sea = 0.0
     for ox in (-1, 0, 1):
         for oy in (-1, 0, 1):
@@ -130,7 +132,7 @@ def get_tile_biome(tile_x, tile_y):
     return 'grass'
 
 # -------------------
-# Game class
+# Game Class
 # -------------------
 class Game:
     def __init__(self):
@@ -150,6 +152,8 @@ class Game:
         self.mouse_pos = (0, 0)
         self.font = pygame.font.SysFont(None, 24)
         self.buttons = []
+        self.slider_dragging = False
+        self.slider_rect = pygame.Rect(0, 0, 0, 0)
         self.setup_ui()
 
     def setup_ui(self):
@@ -220,6 +224,31 @@ class Game:
         brush_label = self.font.render(f"Brush: {self.brush_size}", True, (255, 255, 255))
         self.screen.blit(brush_label, (SCREEN_WIDTH - 150, (UI_HEIGHT - brush_label.get_height()) // 2))
 
+    def draw_zoom_slider(self):
+        slider_x = SCREEN_WIDTH - SLIDER_WIDTH - SLIDER_PADDING
+        slider_y = SCREEN_HEIGHT - SLIDER_HEIGHT - SLIDER_PADDING
+        pygame.draw.rect(self.screen, (100, 100, 100), (slider_x, slider_y, SLIDER_WIDTH, SLIDER_HEIGHT))
+        t = (self.zoom_factor - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)
+        handle_x = slider_x + int(t * (SLIDER_WIDTH - SLIDER_HEIGHT))
+        pygame.draw.rect(self.screen, (200, 200, 200), (handle_x, slider_y, SLIDER_HEIGHT, SLIDER_HEIGHT))
+        return pygame.Rect(slider_x, slider_y, SLIDER_WIDTH, SLIDER_HEIGHT)
+
+    def handle_slider_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.slider_rect.collidepoint(event.pos):
+                self.slider_dragging = True
+                self.update_zoom_from_slider(event.pos[0])
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.slider_dragging = False
+        elif event.type == pygame.MOUSEMOTION and self.slider_dragging:
+            self.update_zoom_from_slider(event.pos[0])
+
+    def update_zoom_from_slider(self, mouse_x):
+        slider_x = SCREEN_WIDTH - SLIDER_WIDTH - SLIDER_PADDING
+        t = (mouse_x - slider_x) / (SLIDER_WIDTH - SLIDER_HEIGHT)
+        t = max(0, min(1, t))
+        self.zoom_factor = MIN_ZOOM + t * (MAX_ZOOM - MIN_ZOOM)
+
     def draw_brush_preview(self):
         mx, my = self.mouse_pos
         my_adj = my - UI_HEIGHT
@@ -244,7 +273,8 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return
-                elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.handle_slider_event(event)
+                if event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
                         if event.pos[1] <= UI_HEIGHT:
                             self.handle_ui_click(event.pos)
@@ -279,11 +309,10 @@ class Game:
                         elif event.y < 0:
                             self.zoom_at(1 / 1.1, mx, my)
 
-            # Movement keys (consistent speed regardless of zoom)
+            # Consistent WASD/arrow movement
             keys = pygame.key.get_pressed()
-            pixels_per_second = 400  # speed in screen pixels
-            move_speed = (pixels_per_second / TILE_SIZE) / self.zoom_factor / 60.0  # tiles per frame
-
+            pixels_per_second = 400
+            move_speed = (pixels_per_second / TILE_SIZE) / self.zoom_factor / 60.0
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.camera_x -= move_speed
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
@@ -321,6 +350,7 @@ class Game:
 
             self.draw_brush_preview()
             self.draw_ui()
+            self.slider_rect = self.draw_zoom_slider()
             pygame.display.flip()
             self.clock.tick(60)
             await asyncio.sleep(1.0 / 60)
