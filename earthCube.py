@@ -138,7 +138,7 @@ class Game:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Endless Map Simulator")
+        pygame.display.set_caption("Earth Cube")
         self.clock = pygame.time.Clock()
         self.camera_x, self.camera_y = 0.0, 0.0
         self.zoom_factor = 1.0
