@@ -46,17 +46,17 @@ BEACH_WIDTH = 0.03
 MOUNTAIN_LEVEL = 0.75
 SHALLOW_WATER_THRESHOLD = 0.18
 
-# Animal/Plant settings
-ENTITY_SPAWN_CHANCE = 0.02  # Chance per tile per frame to spawn
+# Entity settings
+ENTITY_SPAWN_CHANCE = 0.02  # Chance per tile to spawn on initial load
 ENTITY_MAX_PER_TILE = 3     # Max entities per tile
 ENTITY_SPEED = 0.05         # Tiles per second
 ENTITY_SIZE = 8             # Pixel size for rendering
 
 # Entity types and their allowed terrains
 ENTITY_TYPES = {
-    'fish': {'terrains': ['ocean', 'shallow water'], 'color': (255, 255, 0)},
-    'deer': {'terrains': ['forest', 'grass'], 'color': (139, 69, 19)},
-    'bush': {'terrains': ['grass', 'forest'], 'color': (0, 128, 0)}
+    'fish': {'terrains': ['ocean', 'shallow water'], 'color': (255, 255, 0), 'move_type': 'swim'},
+    'deer': {'terrains': ['forest', 'grass'], 'color': (139, 69, 19), 'move_type': 'walk'},
+    'bush': {'terrains': ['grass', 'forest'], 'color': (0, 128, 0), 'move_type': 'static'}
 }
 
 # -------------------
@@ -153,12 +153,15 @@ class Entity:
         self.type = entity_type
         self.x = x
         self.y = y
-        self.vx = random.uniform(-ENTITY_SPEED, ENTITY_SPEED)
-        self.vy = random.uniform(-ENTITY_SPEED, ENTITY_SPEED)
+        self.move_type = ENTITY_TYPES[entity_type]['move_type']
+        self.vx = random.uniform(-ENTITY_SPEED, ENTITY_SPEED) if self.move_type != 'static' else 0
+        self.vy = random.uniform(-ENTITY_SPEED, ENTITY_SPEED) if self.move_type != 'static' else 0
         self.color = ENTITY_TYPES[entity_type]['color']
 
     def update(self, terrain, tile_x, tile_y):
-        # Move entity
+        if self.move_type == 'static':
+            return True
+        # Move entity (walk or swim)
         self.x += self.vx / 60.0
         self.y += self.vy / 60.0
         new_tile_x = math.floor(self.x)
@@ -173,7 +176,7 @@ class Entity:
         if tile_type not in ENTITY_TYPES[self.type]['terrains']:
             return False  # Remove entity if terrain is invalid
         
-        # Update position and bounce at tile edges
+        # Bounce at tile edges
         if new_tile_x != tile_x or new_tile_y != tile_y:
             if abs(self.x - tile_x) > 0.5:
                 self.vx = -self.vx
@@ -187,7 +190,22 @@ class Entity:
         tile_size = TILE_SIZE * zoom_factor
         screen_x = round((self.x - camera_x) * tile_size)
         screen_y = round((self.y - camera_y) * tile_size + ui_height)
-        pygame.draw.circle(screen, self.color, (screen_x, screen_y), ENTITY_SIZE * zoom_factor)
+        if self.move_type == 'swim':
+            # Fish: draw as triangle pointing in movement direction
+            angle = math.atan2(self.vy, self.vx)
+            points = [
+                (screen_x + math.cos(angle) * ENTITY_SIZE * zoom_factor, screen_y + math.sin(angle) * ENTITY_SIZE * zoom_factor),
+                (screen_x + math.cos(angle + 2.5) * ENTITY_SIZE * zoom_factor * 0.5, screen_y + math.sin(angle + 2.5) * ENTITY_SIZE * zoom_factor * 0.5),
+                (screen_x + math.cos(angle - 2.5) * ENTITY_SIZE * zoom_factor * 0.5, screen_y + math.sin(angle - 2.5) * ENTITY_SIZE * zoom_factor * 0.5)
+            ]
+            pygame.draw.polygon(screen, self.color, points)
+        elif self.move_type == 'walk':
+            # Deer: draw as square
+            size = ENTITY_SIZE * zoom_factor
+            pygame.draw.rect(screen, self.color, (screen_x - size / 2, screen_y - size / 2, size, size))
+        else:
+            # Bush: draw as circle
+            pygame.draw.circle(screen, self.color, (screen_x, screen_y), ENTITY_SIZE * zoom_factor)
 
 # -------------------
 # Game Class
@@ -202,6 +220,7 @@ class Game:
         self.zoom_factor = 1.0
         self.terrain = {}
         self.entities = {}  # Dict of (tile_x, tile_y) -> list of entities
+        self.loaded_tiles = set()  # Track loaded tiles to prevent respawning
         self.current_tool = 'grass'
         self.brush_size = 1
         self.is_painting = False
@@ -344,6 +363,9 @@ class Game:
                 tile_x = start_x + dx
                 tile_y = start_y + dy
                 tile_key = (tile_x, tile_y)
+                if tile_key in self.loaded_tiles:
+                    continue  # Skip if tile already loaded
+                self.loaded_tiles.add(tile_key)
                 tile_type = self.terrain.get(tile_key, get_tile_biome(tile_x, tile_y))
                 
                 # Count existing entities
@@ -461,7 +483,7 @@ class Game:
                          math.ceil(tile_size) + 1)
                     )
 
-            # Spawn and update entities
+            # Spawn entities only for newly loaded tiles
             self.spawn_entities(start_x, start_y, tiles_wide, tiles_high)
             self.update_entities()
 
