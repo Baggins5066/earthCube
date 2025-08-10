@@ -40,6 +40,7 @@ class Game:
         self.dragging = False
         self.drag_start_x = 0
         self.drag_start_y = 0
+        self.mouse_pos = (0, 0)  # Track cursor position for preview
 
         # UI setup
         self.font = pygame.font.SysFont(None, 24)
@@ -77,6 +78,10 @@ class Game:
                 self.terrain[(x, y)] = 'grass'
 
     def paint_tile(self, mx, my):
+        # Adjust for UI bar
+        my -= UI_HEIGHT
+        if my < 0:
+            return
         tile_size = TILE_SIZE * self.zoom_factor
         world_x = self.camera_x + mx / tile_size
         world_y = self.camera_y + my / tile_size
@@ -89,14 +94,14 @@ class Game:
     def zoom_at(self, factor_mult, mx, my):
         old_tile_size = TILE_SIZE * self.zoom_factor
         world_x = self.camera_x + mx / old_tile_size
-        world_y = self.camera_y + my / old_tile_size
+        world_y = self.camera_y + (my - UI_HEIGHT) / old_tile_size
         self.zoom_factor *= factor_mult
         self.zoom_factor = max(MIN_ZOOM, min(MAX_ZOOM, self.zoom_factor))
         new_tile_size = TILE_SIZE * self.zoom_factor
         if new_tile_size == 0:
             return
         self.camera_x = world_x - mx / new_tile_size
-        self.camera_y = world_y - my / new_tile_size
+        self.camera_y = world_y - (my - UI_HEIGHT) / new_tile_size
 
     def handle_ui_click(self, pos):
         for btn_type, value, rect in self.buttons:
@@ -130,6 +135,26 @@ class Game:
         brush_label = self.font.render(f"Brush: {self.brush_size}", True, (255, 255, 255))
         self.screen.blit(brush_label, (SCREEN_WIDTH - 150, (UI_HEIGHT - brush_label.get_height()) // 2))
 
+    def draw_brush_preview(self):
+        mx, my = self.mouse_pos
+        my_adj = my - UI_HEIGHT
+        if my_adj < 0:
+            return
+        tile_size = TILE_SIZE * self.zoom_factor
+        world_x = self.camera_x + mx / tile_size
+        world_y = self.camera_y + my_adj / tile_size
+        tile_x = math.floor(world_x)
+        tile_y = math.floor(world_y)
+
+        overlay = pygame.Surface((math.ceil(tile_size) + 1, math.ceil(tile_size) + 1), pygame.SRCALPHA)
+        overlay.fill((255, 255, 255, 80))  # semi-transparent white
+
+        for dx in range(-self.brush_size + 1, self.brush_size):
+            for dy in range(-self.brush_size + 1, self.brush_size):
+                screen_x = round((tile_x + dx - self.camera_x) * tile_size)
+                screen_y = round((tile_y + dy - self.camera_y) * tile_size + UI_HEIGHT)
+                self.screen.blit(overlay, (screen_x, screen_y))
+
     async def main(self):
         while True:
             for event in pygame.event.get():
@@ -151,6 +176,7 @@ class Game:
                     elif event.button == 3:
                         self.dragging = False
                 elif event.type == pygame.MOUSEMOTION:
+                    self.mouse_pos = event.pos
                     if self.is_painting and event.pos[1] > UI_HEIGHT:
                         self.paint_tile(*event.pos)
                     if self.dragging:
@@ -206,7 +232,10 @@ class Game:
                     rect_h = math.ceil(tile_size) + 1
                     pygame.draw.rect(self.screen, color, (rect_x, rect_y, rect_w, rect_h))
 
-            # Draw UI last so it overlays
+            # Draw brush preview
+            self.draw_brush_preview()
+
+            # Draw UI last
             self.draw_ui()
 
             pygame.display.flip()
