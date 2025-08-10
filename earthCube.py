@@ -1,5 +1,7 @@
 import pygame
 import random
+import platform
+import asyncio
 
 # Colors for terrain
 TERRAIN_COLORS = {
@@ -20,6 +22,7 @@ class Game:
         self.camera_x, self.camera_y = 0, 0
         self.terrain = {}  # (x, y): terrain_type
         self.current_tool = 'grass'  # Default tool
+        self.is_painting = False  # Track mouse button state
 
     def generate_terrain(self, x, y):
         if (x, y) not in self.terrain:
@@ -31,12 +34,16 @@ class Game:
             else:
                 self.terrain[(x, y)] = 'grass'
 
-    def run(self):
-        running = True
-        while running:
+    def paint_tile(self, mx, my):
+        tile_x = (mx // TILE_SIZE) + self.camera_x
+        tile_y = (my // TILE_SIZE) + self.camera_y
+        self.terrain[(tile_x, tile_y)] = self.current_tool
+
+    async def main(self):
+        while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
+                    return
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         self.current_tool = 'water'
@@ -45,10 +52,16 @@ class Game:
                     elif event.key == pygame.K_3:
                         self.current_tool = 'sand'
                 elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Left mouse button
+                        self.is_painting = True
+                        mx, my = pygame.mouse.get_pos()
+                        self.paint_tile(mx, my)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1:
+                        self.is_painting = False
+                elif event.type == pygame.MOUSEMOTION and self.is_painting:
                     mx, my = pygame.mouse.get_pos()
-                    tile_x = (mx // TILE_SIZE) + self.camera_x
-                    tile_y = (my // TILE_SIZE) + self.camera_y
-                    self.terrain[(tile_x, tile_y)] = self.current_tool
+                    self.paint_tile(mx, my)
 
             # Movement
             keys = pygame.key.get_pressed()
@@ -75,9 +88,10 @@ class Game:
 
             pygame.display.flip()
             self.clock.tick(60)
+            await asyncio.sleep(1.0 / 60)
 
-        pygame.quit()
-
-if __name__ == "__main__":
-    game = Game()
-    game.run()
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(Game().main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(Game().main())
