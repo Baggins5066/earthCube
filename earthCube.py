@@ -2,6 +2,7 @@ import pygame
 import platform
 import asyncio
 import math
+import random
 from functools import lru_cache
 
 # -------------------
@@ -44,6 +45,19 @@ SEA_LEVEL = 0.45
 BEACH_WIDTH = 0.03
 MOUNTAIN_LEVEL = 0.75
 SHALLOW_WATER_THRESHOLD = 0.18
+
+# Animal/Plant settings
+ENTITY_SPAWN_CHANCE = 0.02  # Chance per tile per frame to spawn
+ENTITY_MAX_PER_TILE = 3     # Max entities per tile
+ENTITY_SPEED = 0.05         # Tiles per second
+ENTITY_SIZE = 8             # Pixel size for rendering
+
+# Entity types and their allowed terrains
+ENTITY_TYPES = {
+    'fish': {'terrains': ['ocean', 'shallow water'], 'color': (255, 255, 0)},
+    'deer': {'terrains': ['forest', 'grass'], 'color': (139, 69, 19)},
+    'bush': {'terrains': ['grass', 'forest'], 'color': (0, 128, 0)}
+}
 
 # -------------------
 # Noise functions
@@ -132,6 +146,50 @@ def get_tile_biome(tile_x, tile_y):
     return 'grass'
 
 # -------------------
+# Entity Class
+# -------------------
+class Entity:
+    def __init__(self, entity_type, x, y):
+        self.type = entity_type
+        self.x = x
+        self.y = y
+        self.vx = random.uniform(-ENTITY_SPEED, ENTITY_SPEED)
+        self.vy = random.uniform(-ENTITY_SPEED, ENTITY_SPEED)
+        self.color = ENTITY_TYPES[entity_type]['color']
+
+    def update(self, terrain, tile_x, tile_y):
+        # Move entity
+        self.x += self.vx / 60.0
+        self.y += self.vy / 60.0
+        new_tile_x = math.floor(self.x)
+        new_tile_y = math.floor(self.y)
+        
+        # Check if entity is still in valid terrain
+        tile_key = (new_tile_x, new_tile_y)
+        if tile_key in terrain:
+            tile_type = terrain[tile_key]
+        else:
+            tile_type = get_tile_biome(new_tile_x, new_tile_y)
+        if tile_type not in ENTITY_TYPES[self.type]['terrains']:
+            return False  # Remove entity if terrain is invalid
+        
+        # Update position and bounce at tile edges
+        if new_tile_x != tile_x or new_tile_y != tile_y:
+            if abs(self.x - tile_x) > 0.5:
+                self.vx = -self.vx
+                self.x = tile_x + math.copysign(0.49, self.x - tile_x)
+            if abs(self.y - tile_y) > 0.5:
+                self.vy = -self.vy
+                self.y = tile_y + math.copysign(0.49, self.y - tile_y)
+        return True
+
+    def draw(self, screen, camera_x, camera_y, zoom_factor, ui_height):
+        tile_size = TILE_SIZE * zoom_factor
+        screen_x = round((self.x - camera_x) * tile_size)
+        screen_y = round((self.y - camera_y) * tile_size + ui_height)
+        pygame.draw.circle(screen, self.color, (screen_x, screen_y), ENTITY_SIZE * zoom_factor)
+
+# -------------------
 # Game Class
 # -------------------
 class Game:
@@ -143,6 +201,7 @@ class Game:
         self.camera_x, self.camera_y = 0.0, 0.0
         self.zoom_factor = 1.0
         self.terrain = {}
+        self.entities = {}  # Dict of (tile_x, tile_y) -> list of entities
         self.current_tool = 'grass'
         self.brush_size = 1
         self.is_painting = False
@@ -180,7 +239,18 @@ class Game:
         tile_y = math.floor(world_y)
         for dx in range(-self.brush_size + 1, self.brush_size):
             for dy in range(-self.brush_size + 1, self.brush_size):
-                self.terrain[(tile_x + dx, tile_y + dy)] = self.current_tool
+                tile_key = (tile_x + dx, tile_y + dy)
+                old_terrain = self.terrain.get(tile_key, get_tile_biome(tile_x + dx, tile_y + dy))
+                self.terrain[tile_key] = self.current_tool
+                # Remove entities if terrain becomes invalid
+                if tile_key in self.entities:
+                    valid_entities = []
+                    for entity in self.entities[tile_key]:
+                        if self.current_tool in ENTITY_TYPES[entity.type]['terrains']:
+                            valid_entities.append(entity)
+                    self.entities[tile_key] = valid_entities
+                    if not valid_entities:
+                        del self.entities[tile_key]
 
     def zoom_at(self, factor_mult, mx, my):
         old_tile_size = TILE_SIZE * self.zoom_factor
@@ -268,6 +338,48 @@ class Game:
                 screen_y = round((tile_y + dy - self.camera_y) * tile_size + UI_HEIGHT)
                 self.screen.blit(overlay, (screen_x, screen_y))
 
+    def spawn_entities(self, start_x, start_y, tiles_wide, tiles_high):
+        for dx in range(tiles_wide):
+            for dy in range(tiles_high):
+                tile_x = start_x + dx
+                tile_y = start_y + dy
+                tile_key = (tile_x, tile_y)
+                tile_type = self.terrain.get(tile_key, get_tile_biome(tile_x, tile_y))
+                
+                # Count existing entities
+                entity_count = len(self.entities.get(tile_key, []))
+                if entity_count >= ENTITY_MAX_PER_TILE:
+                    continue
+                    
+                # Try to spawn a new entity
+                if random.random() < ENTITY_SPAWN_CHANCE:
+                    valid_entities = [e for e, data in ENTITY_TYPES.items() if tile_type in data['terrains']]
+                    if valid_entities:
+                        entity_type = random.choice(valid_entities)
+                        new_entity = Entity(entity_type, tile_x + 0.5, tile_y + 0.5)
+                        if tile_key not in self.entities:
+                            self.entities[tile_key] = []
+                        self.entities[tile_key].append(new_entity)
+
+    def update_entities(self):
+        for tile_key in list(self.entities.keys()):
+            entities = self.entities[tile_key]
+            valid_entities = []
+            for entity in entities:
+                if entity.update(self.terrain, *tile_key):
+                    new_tile_x = math.floor(entity.x)
+                    new_tile_y = math.floor(entity.y)
+                    new_tile_key = (new_tile_x, new_tile_y)
+                    if new_tile_key != tile_key:
+                        if new_tile_key not in self.entities:
+                            self.entities[new_tile_key] = []
+                        self.entities[new_tile_key].append(entity)
+                    else:
+                        valid_entities.append(entity)
+            self.entities[tile_key] = valid_entities
+            if not self.entities[tile_key]:
+                del self.entities[tile_key]
+
     async def main(self):
         while True:
             for event in pygame.event.get():
@@ -333,6 +445,7 @@ class Game:
             offset_x = (start_x - self.camera_x) * tile_size
             offset_y = (start_y - self.camera_y) * tile_size + UI_HEIGHT
 
+            # Draw terrain
             for dx in range(tiles_wide):
                 for dy in range(tiles_high):
                     tile_x = start_x + dx
@@ -347,6 +460,15 @@ class Game:
                          math.ceil(tile_size) + 1,
                          math.ceil(tile_size) + 1)
                     )
+
+            # Spawn and update entities
+            self.spawn_entities(start_x, start_y, tiles_wide, tiles_high)
+            self.update_entities()
+
+            # Draw entities
+            for tile_key in self.entities:
+                for entity in self.entities[tile_key]:
+                    entity.draw(self.screen, self.camera_x, self.camera_y, self.zoom_factor, UI_HEIGHT)
 
             self.draw_brush_preview()
             self.draw_ui()
