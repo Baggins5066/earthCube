@@ -34,9 +34,9 @@ MOIST_OCTAVES = 4
 RIVER_OCTAVES = 5
 
 # Higher frequency = smaller scale terrain
-ELEV_FREQ = 1 / 100.0     # was 1/200
-MOIST_FREQ = 1 / 40.0     # was 1/80
-RIVER_FREQ = 1 / 200.0    # was 1/400
+ELEV_FREQ = 1 / 50.0
+MOIST_FREQ = 1 / 20.0
+RIVER_FREQ = 1 / 100.0
 
 SEA_LEVEL = 0.45
 BEACH_WIDTH = 0.03
