@@ -20,6 +20,11 @@ SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
 MIN_ZOOM = 0.1
 MAX_ZOOM = 4.0
 
+UI_HEIGHT = 50
+BUTTON_PADDING = 10
+BUTTON_WIDTH = 80
+BUTTON_HEIGHT = 30
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -28,12 +33,33 @@ class Game:
         self.clock = pygame.time.Clock()
         self.camera_x, self.camera_y = 0.0, 0.0
         self.zoom_factor = 1.0
-        self.terrain = {}  # (x, y): terrain_type
-        self.current_tool = 'grass'  # Default tool
+        self.terrain = {}
+        self.current_tool = 'grass'
+        self.brush_size = 1
         self.is_painting = False
         self.dragging = False
         self.drag_start_x = 0
         self.drag_start_y = 0
+
+        # UI setup
+        self.font = pygame.font.SysFont(None, 24)
+        self.buttons = []
+        self.setup_ui()
+
+    def setup_ui(self):
+        x = BUTTON_PADDING
+        y = (UI_HEIGHT - BUTTON_HEIGHT) // 2
+        # Material buttons
+        for material in TERRAIN_COLORS.keys():
+            rect = pygame.Rect(x, y, BUTTON_WIDTH, BUTTON_HEIGHT)
+            self.buttons.append(("material", material, rect))
+            x += BUTTON_WIDTH + BUTTON_PADDING
+        # Brush controls
+        rect_minus = pygame.Rect(x, y, 40, BUTTON_HEIGHT)
+        self.buttons.append(("brush_minus", None, rect_minus))
+        x += 40 + BUTTON_PADDING
+        rect_plus = pygame.Rect(x, y, 40, BUTTON_HEIGHT)
+        self.buttons.append(("brush_plus", None, rect_plus))
 
     def generate_terrain(self, x, y):
         x, y = int(x), int(y)
@@ -56,49 +82,66 @@ class Game:
         world_y = self.camera_y + my / tile_size
         tile_x = math.floor(world_x)
         tile_y = math.floor(world_y)
-        self.terrain[(tile_x, tile_y)] = self.current_tool
+        for dx in range(-self.brush_size + 1, self.brush_size):
+            for dy in range(-self.brush_size + 1, self.brush_size):
+                self.terrain[(tile_x + dx, tile_y + dy)] = self.current_tool
 
     def zoom_at(self, factor_mult, mx, my):
         old_tile_size = TILE_SIZE * self.zoom_factor
         world_x = self.camera_x + mx / old_tile_size
         world_y = self.camera_y + my / old_tile_size
-
         self.zoom_factor *= factor_mult
         self.zoom_factor = max(MIN_ZOOM, min(MAX_ZOOM, self.zoom_factor))
-
         new_tile_size = TILE_SIZE * self.zoom_factor
         if new_tile_size == 0:
             return
         self.camera_x = world_x - mx / new_tile_size
         self.camera_y = world_y - my / new_tile_size
 
+    def handle_ui_click(self, pos):
+        for btn_type, value, rect in self.buttons:
+            if rect.collidepoint(pos):
+                if btn_type == "material":
+                    self.current_tool = value
+                elif btn_type == "brush_minus":
+                    self.brush_size = max(1, self.brush_size - 1)
+                elif btn_type == "brush_plus":
+                    self.brush_size += 1
+                return True
+        return False
+
+    def draw_ui(self):
+        pygame.draw.rect(self.screen, (50, 50, 50), (0, 0, SCREEN_WIDTH, UI_HEIGHT))
+        for btn_type, value, rect in self.buttons:
+            color = (200, 200, 200)
+            if btn_type == "material" and value == self.current_tool:
+                color = (255, 255, 255)
+            pygame.draw.rect(self.screen, color, rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), rect, 2)
+            if btn_type == "material":
+                text_surf = self.font.render(value, True, (0, 0, 0))
+            elif btn_type == "brush_minus":
+                text_surf = self.font.render("-", True, (0, 0, 0))
+            elif btn_type == "brush_plus":
+                text_surf = self.font.render("+", True, (0, 0, 0))
+            text_rect = text_surf.get_rect(center=rect.center)
+            self.screen.blit(text_surf, text_rect)
+
+        brush_label = self.font.render(f"Brush: {self.brush_size}", True, (255, 255, 255))
+        self.screen.blit(brush_label, (SCREEN_WIDTH - 150, (UI_HEIGHT - brush_label.get_height()) // 2))
+
     async def main(self):
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_1:
-                        self.current_tool = 'water'
-                    elif event.key == pygame.K_2:
-                        self.current_tool = 'grass'
-                    elif event.key == pygame.K_3:
-                        self.current_tool = 'sand'
-                    elif event.key == pygame.K_4:
-                        self.current_tool = 'rock'
-                    elif event.key == pygame.K_5:
-                        self.current_tool = 'forest'
-                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                        mx, my = pygame.mouse.get_pos()
-                        self.zoom_at(1.1, mx, my)
-                    elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                        mx, my = pygame.mouse.get_pos()
-                        self.zoom_at(1 / 1.1, mx, my)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
-                        self.is_painting = True
-                        mx, my = event.pos
-                        self.paint_tile(mx, my)
+                        if event.pos[1] <= UI_HEIGHT:
+                            self.handle_ui_click(event.pos)
+                        else:
+                            self.is_painting = True
+                            self.paint_tile(*event.pos)
                     elif event.button == 3:
                         self.dragging = True
                         self.drag_start_x, self.drag_start_y = event.pos
@@ -108,26 +151,25 @@ class Game:
                     elif event.button == 3:
                         self.dragging = False
                 elif event.type == pygame.MOUSEMOTION:
-                    mx, my = event.pos
-                    if self.is_painting:
-                        self.paint_tile(mx, my)
+                    if self.is_painting and event.pos[1] > UI_HEIGHT:
+                        self.paint_tile(*event.pos)
                     if self.dragging:
-                        dx = mx - self.drag_start_x
-                        dy = my - self.drag_start_y
+                        dx = event.pos[0] - self.drag_start_x
+                        dy = event.pos[1] - self.drag_start_y
                         tile_size = TILE_SIZE * self.zoom_factor
                         if tile_size != 0:
                             self.camera_x -= dx / tile_size
                             self.camera_y -= dy / tile_size
-                        self.drag_start_x = mx
-                        self.drag_start_y = my
+                        self.drag_start_x, self.drag_start_y = event.pos
                 elif event.type == pygame.MOUSEWHEEL:
                     mx, my = pygame.mouse.get_pos()
-                    if event.y > 0:
-                        self.zoom_at(1.1, mx, my)
-                    elif event.y < 0:
-                        self.zoom_at(1 / 1.1, mx, my)
+                    if my > UI_HEIGHT:
+                        if event.y > 0:
+                            self.zoom_at(1.1, mx, my)
+                        elif event.y < 0:
+                            self.zoom_at(1 / 1.1, mx, my)
 
-            # Movement
+            # Movement keys
             keys = pygame.key.get_pressed()
             move_speed = 0.1
             if keys[pygame.K_LEFT]:
@@ -141,17 +183,16 @@ class Game:
 
             self.screen.fill((0, 0, 0))
 
-            # Draw visible tiles without gaps
+            # Draw world
             tile_size = TILE_SIZE * self.zoom_factor
             if tile_size <= 0:
                 tile_size = TILE_SIZE * MIN_ZOOM
-
             tiles_wide = math.ceil(SCREEN_WIDTH / tile_size) + 2
-            tiles_high = math.ceil(SCREEN_HEIGHT / tile_size) + 2
+            tiles_high = math.ceil((SCREEN_HEIGHT - UI_HEIGHT) / tile_size) + 2
             start_x = math.floor(self.camera_x)
             start_y = math.floor(self.camera_y)
             offset_x = (start_x - self.camera_x) * tile_size
-            offset_y = (start_y - self.camera_y) * tile_size
+            offset_y = (start_y - self.camera_y) * tile_size + UI_HEIGHT
 
             for dx in range(tiles_wide):
                 for dy in range(tiles_high):
@@ -161,9 +202,12 @@ class Game:
                     color = TERRAIN_COLORS[self.terrain[(tile_x, tile_y)]]
                     rect_x = round(offset_x + dx * tile_size)
                     rect_y = round(offset_y + dy * tile_size)
-                    rect_w = math.ceil(tile_size) + 1  # cover gaps
+                    rect_w = math.ceil(tile_size) + 1
                     rect_h = math.ceil(tile_size) + 1
                     pygame.draw.rect(self.screen, color, (rect_x, rect_y, rect_w, rect_h))
+
+            # Draw UI last so it overlays
+            self.draw_ui()
 
             pygame.display.flip()
             self.clock.tick(60)
