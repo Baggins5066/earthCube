@@ -35,8 +35,9 @@ class Game:
                 self.terrain[(x, y)] = 'grass'
 
     def paint_tile(self, mx, my):
-        tile_x = (mx // TILE_SIZE) + self.camera_x
-        tile_y = (my // TILE_SIZE) + self.camera_y
+        # Adjust mouse coordinates by camera offset
+        tile_x = (mx + self.camera_x * TILE_SIZE) // TILE_SIZE
+        tile_y = (my + self.camera_y * TILE_SIZE) // TILE_SIZE
         self.terrain[(tile_x, tile_y)] = self.current_tool
 
     async def main(self):
@@ -79,12 +80,14 @@ class Game:
             # Draw visible tiles
             for dx in range(SCREEN_WIDTH // TILE_SIZE + 2):
                 for dy in range(SCREEN_HEIGHT // TILE_SIZE + 2):
-                    tile_x = self.camera_x + dx - 1
-                    tile_y = self.camera_y + dy - 1
+                    tile_x = self.camera_x + dx
+                    tile_y = self.camera_y + dy
                     self.generate_terrain(tile_x, tile_y)
                     color = TERRAIN_COLORS[self.terrain[(tile_x, tile_y)]]
                     pygame.draw.rect(self.screen, color,
-                                     (dx * TILE_SIZE, dy * TILE_SIZE, TILE_SIZE, TILE_SIZE))
+                                     ((dx - self.camera_x % 1) * TILE_SIZE, 
+                                      (dy - self.camera_y % 1) * TILE_SIZE, 
+                                      TILE_SIZE, TILE_SIZE))
 
             pygame.display.flip()
             self.clock.tick(60)
