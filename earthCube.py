@@ -225,8 +225,8 @@ class Game:
         self.screen.blit(brush_label, (SCREEN_WIDTH - 150, (UI_HEIGHT - brush_label.get_height()) // 2))
 
     def draw_zoom_slider(self):
-        slider_x = SCREEN_WIDTH - SLIDER_WIDTH - SLIDER_PADDING
-        slider_y = SCREEN_HEIGHT - SLIDER_HEIGHT - SLIDER_PADDING
+        slider_x = SCREEN_WIDTH - SLIDER_WIDTH - BUTTON_PADDING
+        slider_y = (UI_HEIGHT - SLIDER_HEIGHT) // 2
         pygame.draw.rect(self.screen, (100, 100, 100), (slider_x, slider_y, SLIDER_WIDTH, SLIDER_HEIGHT))
         t = (self.zoom_factor - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)
         handle_x = slider_x + int(t * (SLIDER_WIDTH - SLIDER_HEIGHT))
