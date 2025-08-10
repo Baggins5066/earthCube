@@ -7,7 +7,9 @@ import asyncio
 TERRAIN_COLORS = {
     'water': (0, 0, 255),
     'grass': (0, 255, 0),
-    'sand': (255, 255, 0)
+    'sand': (255, 255, 0),
+    'rock': (128, 128, 128),
+    'forest': (0, 100, 0)
 }
 
 TILE_SIZE = 32
@@ -27,10 +29,14 @@ class Game:
     def generate_terrain(self, x, y):
         if (x, y) not in self.terrain:
             rand = random.random()
-            if rand < 0.3:
+            if rand < 0.2:
                 self.terrain[(x, y)] = 'water'
-            elif rand < 0.6:
+            elif rand < 0.4:
                 self.terrain[(x, y)] = 'sand'
+            elif rand < 0.6:
+                self.terrain[(x, y)] = 'rock'
+            elif rand < 0.8:
+                self.terrain[(x, y)] = 'forest'
             else:
                 self.terrain[(x, y)] = 'grass'
 
@@ -52,6 +58,10 @@ class Game:
                         self.current_tool = 'grass'
                     elif event.key == pygame.K_3:
                         self.current_tool = 'sand'
+                    elif event.key == pygame.K_4:
+                        self.current_tool = 'rock'
+                    elif event.key == pygame.K_5:
+                        self.current_tool = 'forest'
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left mouse button
                         self.is_painting = True
