@@ -279,16 +279,18 @@ class Game:
                         elif event.y < 0:
                             self.zoom_at(1 / 1.1, mx, my)
 
-            # Movement keys
+            # Movement keys (consistent speed regardless of zoom)
             keys = pygame.key.get_pressed()
-            move_speed = 0.1
-            if keys[pygame.K_LEFT]:
+            pixels_per_second = 400  # speed in screen pixels
+            move_speed = (pixels_per_second / TILE_SIZE) / self.zoom_factor / 60.0  # tiles per frame
+
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.camera_x -= move_speed
-            if keys[pygame.K_RIGHT]:
+            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
                 self.camera_x += move_speed
-            if keys[pygame.K_UP]:
+            if keys[pygame.K_UP] or keys[pygame.K_w]:
                 self.camera_y -= move_speed
-            if keys[pygame.K_DOWN]:
+            if keys[pygame.K_DOWN] or keys[pygame.K_s]:
                 self.camera_y += move_speed
 
             self.screen.fill((0, 0, 0))
